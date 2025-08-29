@@ -13,63 +13,36 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import logging
 
-# Simple cache implementation for Vercel compatibility
-import functools
-import hashlib
-from cachetools import TTLCache
-
-# Global cache instances
-_markets_cache = TTLCache(maxsize=100, ttl=int(os.getenv("CACHE_TTL_MARKETS", "30")))
-_charts_cache = TTLCache(maxsize=500, ttl=int(os.getenv("CACHE_TTL_CHARTS", "60")))
-_tickers_cache = TTLCache(maxsize=200, ttl=int(os.getenv("CACHE_TTL_TICKERS", "30")))
-
-def cache_response(ttl: int = 60, cache_type: str = "default"):
-    """Simple cache decorator for Vercel deployment."""
-    def decorator(func):
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            # Generate simple cache key
-            key_parts = [func.__name__] + [str(arg) for arg in args] + [f"{k}={v}" for k, v in kwargs.items()]
-            cache_key = hashlib.md5("|".join(key_parts).encode()).hexdigest()
-            
-            # Select cache
-            if cache_type == "markets":
-                cache = _markets_cache
-            elif cache_type == "charts":
-                cache = _charts_cache
-            elif cache_type == "tickers":
-                cache = _tickers_cache
-            else:
-                cache = TTLCache(maxsize=100, ttl=ttl)
-            
-            # Check cache
-            if cache_key in cache:
-                return cache[cache_key]
-            
-            # Execute and cache
-            result = await func(*args, **kwargs)
-            cache[cache_key] = result
-            return result
+try:
+    from utils.cache import cache_response, clear_cache, get_cache_stats
+except ImportError:
+    # Fallback for Vercel serverless environment
+    import sys
+    import os
+    import functools
+    
+    # Try adding the parent directory to path
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    
+    try:
+        from utils.cache import cache_response, clear_cache, get_cache_stats
+    except ImportError:
+        # Final fallback - minimal cache implementation
+        def cache_response(ttl: int = 60, cache_type: str = "default", **kwargs):
+            def decorator(func):
+                @functools.wraps(func)
+                async def wrapper(*args, **kwargs):
+                    return await func(*args, **kwargs)
+                return wrapper
+            return decorator
         
-        return wrapper
-    return decorator
-
-def clear_cache(cache_type: str = "all"):
-    """Clear cache entries."""
-    if cache_type == "all":
-        _markets_cache.clear()
-        _charts_cache.clear()
-        _tickers_cache.clear()
-        return True
-    return False
-
-def get_cache_stats():
-    """Get cache statistics."""
-    return {
-        "markets": len(_markets_cache),
-        "charts": len(_charts_cache),
-        "tickers": len(_tickers_cache)
-    }
+        def clear_cache(cache_type: str = "all"):
+            return 0
+        
+        def get_cache_stats():
+            return {"status": "cache_disabled"}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
