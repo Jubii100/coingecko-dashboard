@@ -6,7 +6,8 @@
       "use": "@vercel/python",
       "config": {
         "maxLambdaSize": "15mb",
-        "runtime": "python3.9"
+        "runtime": "python3.9",
+        "maxDuration": 10
       }
     },
     {
@@ -26,11 +27,6 @@
   ],
   "env": {
     "PYTHON_VERSION": "3.9"
-  },
-  "functions": {
-    "backend/api/index.py": {
-      "maxDuration": 10
-    }
   },
   "outputDirectory": "frontend/.next"
 }
