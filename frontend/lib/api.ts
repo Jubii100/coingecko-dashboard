@@ -1,6 +1,21 @@
 import { MarketResponse, ChartResponse, TickersResponse, SearchFilters } from './types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Use relative URLs in production, localhost in development
+const getApiBaseUrl = () => {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  
+  // In production (Vercel), use relative URLs
+  if (process.env.NODE_ENV === 'production') {
+    return '';
+  }
+  
+  // In development, use localhost
+  return 'http://localhost:8000';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 class ApiError extends Error {
   constructor(
