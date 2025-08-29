@@ -13,7 +13,63 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import logging
 
-from utils.cache import cache_response, clear_cache, get_cache_stats
+# Simple cache implementation for Vercel compatibility
+import functools
+import hashlib
+from cachetools import TTLCache
+
+# Global cache instances
+_markets_cache = TTLCache(maxsize=100, ttl=int(os.getenv("CACHE_TTL_MARKETS", "30")))
+_charts_cache = TTLCache(maxsize=500, ttl=int(os.getenv("CACHE_TTL_CHARTS", "60")))
+_tickers_cache = TTLCache(maxsize=200, ttl=int(os.getenv("CACHE_TTL_TICKERS", "30")))
+
+def cache_response(ttl: int = 60, cache_type: str = "default"):
+    """Simple cache decorator for Vercel deployment."""
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Generate simple cache key
+            key_parts = [func.__name__] + [str(arg) for arg in args] + [f"{k}={v}" for k, v in kwargs.items()]
+            cache_key = hashlib.md5("|".join(key_parts).encode()).hexdigest()
+            
+            # Select cache
+            if cache_type == "markets":
+                cache = _markets_cache
+            elif cache_type == "charts":
+                cache = _charts_cache
+            elif cache_type == "tickers":
+                cache = _tickers_cache
+            else:
+                cache = TTLCache(maxsize=100, ttl=ttl)
+            
+            # Check cache
+            if cache_key in cache:
+                return cache[cache_key]
+            
+            # Execute and cache
+            result = await func(*args, **kwargs)
+            cache[cache_key] = result
+            return result
+        
+        return wrapper
+    return decorator
+
+def clear_cache(cache_type: str = "all"):
+    """Clear cache entries."""
+    if cache_type == "all":
+        _markets_cache.clear()
+        _charts_cache.clear()
+        _tickers_cache.clear()
+        return True
+    return False
+
+def get_cache_stats():
+    """Get cache statistics."""
+    return {
+        "markets": len(_markets_cache),
+        "charts": len(_charts_cache),
+        "tickers": len(_tickers_cache)
+    }
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -329,19 +385,15 @@ async def get_cache_statistics():
     }
 
 
-# Application lifecycle
+# Application lifecycle - simplified for Vercel
 @app.on_event("startup")
 async def startup_event():
     """Initialize application on startup."""
-    logger.info("Starting CoinGecko Dashboard API")
-    logger.info(f"CoinGecko API Key configured: {'Yes' if COINGECKO_API_KEY else 'No'}")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on application shutdown."""
-    logger.info("Shutting down CoinGecko Dashboard API")
-    await http_client.aclose()
+    try:
+        logger.info("Starting CoinGecko Dashboard API")
+        logger.info(f"CoinGecko API Key configured: {'Yes' if COINGECKO_API_KEY else 'No'}")
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
 
 
 # Root endpoint for Vercel
@@ -353,9 +405,3 @@ async def root():
         "docs": "/api/docs",
         "health": "/api/health"
     }
-
-
-# Export for Vercel
-def handler(request, context):
-    """Vercel serverless function handler."""
-    return app(request, context)
